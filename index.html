@@ -352,9 +352,40 @@
     zone.addEventListener('dragover',  () => zone.classList.add('active'));
     zone.addEventListener('dragleave', () => zone.classList.remove('active'));
 
+    // Recursively collect all image Files from a dropped FileSystemEntry
+    async function collectFiles(entry) {
+        if (entry.isFile) {
+            return new Promise(resolve => entry.file(f => {
+                resolve(f.type.startsWith('image/') ? [f] : []);
+            }));
+        }
+        if (entry.isDirectory) {
+            const reader = entry.createReader();
+            const allEntries = [];
+            // readEntries may return batches; keep reading until empty
+            await new Promise(resolve => {
+                function readBatch() {
+                    reader.readEntries(batch => {
+                        if (!batch.length) return resolve();
+                        allEntries.push(...batch);
+                        readBatch();
+                    });
+                }
+                readBatch();
+            });
+            const nested = await Promise.all(allEntries.map(collectFiles));
+            return nested.flat();
+        }
+        return [];
+    }
+
     zone.addEventListener('drop', async (e) => {
         zone.classList.remove('active');
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+
+        const items = Array.from(e.dataTransfer.items);
+        const entries = items.map(i => i.webkitGetAsEntry()).filter(Boolean);
+        const files = (await Promise.all(entries.map(collectFiles))).flat();
+
         if (!files.length) return;
 
         zone.classList.add('processing');

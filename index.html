@@ -252,63 +252,96 @@
 </div>
 
 <script type="module">
-    // To:
-import { initializeImageMagick, ImageMagick, MagickFormat }
-    from './magick-wasm.js';
-const wasmUrl = './magick.wasm';
-    const bar      = document.getElementById('progress-bar');
-    const status   = document.getElementById('status-text');
-    const zone     = document.getElementById('drop-zone');
-    const label    = document.getElementById('label');
-    const warning  = document.getElementById('coi-warning');
+    import { initializeImageMagick, ImageMagick, MagickFormat }
+        from './magick-wasm.js';
+
+    const wasmUrl = './magick.wasm';
+
+    const bar     = document.getElementById('progress-bar');
+    const status  = document.getElementById('status-text');
+    const zone    = document.getElementById('drop-zone');
+    const label   = document.getElementById('label');
+    const warning = document.getElementById('coi-warning');
 
     // --- COI status feedback ---
-    // If we already tried a reload and still not isolated, surface a warning.
-    // (Doesn't block — WASM will still attempt to load.)
     if (!self.crossOriginIsolated && sessionStorage.getItem('coi-reload-attempted')) {
         warning.style.display = 'block';
-        console.warn('crossOriginIsolated is false after reload. SharedArrayBuffer may be unavailable. WASM will attempt anyway.');
+        console.warn('[ChrushKit] crossOriginIsolated is false after reload. WASM will attempt anyway.');
     }
 
-    // --- Fake progress (visual feedback during WASM network fetch) ---
-    let progress = 0;
-    const interval = setInterval(() => {
-        if (progress < 88) {
-            // Ease the fake progress: fast at first, slower near the end
-            progress += (88 - progress) * 0.04;
-            bar.style.width = progress + '%';
+    // --- PHASE 1: Stream with real byte progress, return a Blob URL ---
+    // Key fix: initializeImageMagick needs a URL string, not a raw ArrayBuffer.
+    // We stream for progress tracking, then build a same-origin Blob URL from
+    // the collected chunks and pass that string to the library.
+    async function fetchWasmWithProgress(url) {
+        status.innerText = 'Downloading engine...';
+        bar.style.transition = 'width 0.1s linear';
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+
+        const contentLength = response.headers.get('Content-Length');
+        const total = contentLength ? parseInt(contentLength, 10) : 0;
+        const reader = response.body.getReader();
+        const chunks = [];
+        let received = 0;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            received += value.length;
+            if (total) {
+                bar.style.width = ((received / total) * 80) + '%';
+                status.innerText = `Downloading — ${(received/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB`;
+            } else {
+                status.innerText = `Downloading — ${(received/1048576).toFixed(1)} MB`;
+                bar.style.width = '60%';
+            }
         }
-    }, 150);
+
+        // Assemble chunks into a Blob, create a local object URL
+        // This is a valid same-origin URL the library can fetch from
+        const blob = new Blob(chunks, { type: 'application/wasm' });
+        return URL.createObjectURL(blob);
+    }
 
     // --- Engine init ---
+    let blobUrl = null;
     try {
-        await initializeImageMagick(wasmUrl);
+        blobUrl = await fetchWasmWithProgress(wasmUrl);
 
-        clearInterval(interval);
+        // Phase 2: compile (no progress API — just hold bar visually)
+        status.innerText = 'Compiling engine...';
+        bar.style.transition = 'width 2s ease-out';
+        bar.style.width = '92%';
+
+        await initializeImageMagick(blobUrl);
+        URL.revokeObjectURL(blobUrl); // free RAM after init
+
+        bar.style.transition = 'width 0.3s ease';
         bar.style.width = '100%';
         status.innerText = 'Engine Online ✦ Local Processing Active';
         status.style.color = '#00ff88';
         label.innerText = 'DRAG TO CRUSH';
         zone.classList.add('ready');
 
-        // Fade loader after success
         setTimeout(() => {
             document.getElementById('loader-container').style.opacity = '0.25';
             status.style.color = '';
         }, 2500);
 
-        // Clear the reload flag now that engine loaded successfully
         sessionStorage.removeItem('coi-reload-attempted');
 
     } catch (e) {
-        clearInterval(interval);
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
         bar.style.background = 'var(--red)';
         bar.style.boxShadow = '0 0 12px var(--red)';
         bar.style.width = '100%';
         status.innerText = 'ERROR: ENGINE FAILED TO LOAD';
         status.style.color = 'var(--red)';
         label.innerText = 'SEE CONSOLE';
-        console.error('[ChrushKit] WASM init failed:', e);
+        console.error('[ChrushKit] Init failed:', e);
     }
 
     // --- Drag & drop ---
@@ -336,12 +369,9 @@ const wasmUrl = './magick.wasm';
 
             await new Promise((resolve) => {
                 ImageMagick.read(data, (img) => {
-                    // Resize to max 1920px wide, preserve aspect ratio
-                    // img.resize() with geometry string is safer across versions
                     if (img.width > 1920) {
                         img.resize(1920, Math.round(img.height * (1920 / img.width)));
                     }
-
                     img.write(MagickFormat.Webp, (out) => {
                         const blob = new Blob([out], { type: 'image/webp' });
                         const a    = document.createElement('a');
@@ -349,11 +379,7 @@ const wasmUrl = './magick.wasm';
                         a.download = `crushed_${file.name.replace(/\.[^.]+$/, '')}.webp`;
                         document.body.appendChild(a);
                         a.click();
-                        // Clean up the object URL after a short delay
-                        setTimeout(() => {
-                            URL.revokeObjectURL(a.href);
-                            a.remove();
-                        }, 1000);
+                        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
                         resolve();
                     });
                 });

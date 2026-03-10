@@ -245,7 +245,7 @@
     <div id="drop-zone">
         <div id="drop-icon">⬇</div>
         <span id="label">WAITING FOR ENGINE</span>
-        <span id="sub-label">JPG · PNG · TIFF · BMP</span>
+        <span id="sub-label">JPG · PNG → JPG Q82 + WEBP Q75</span>
     </div>
 
     <div class="privacy-note">✦ <span>zero upload</span> · all processing happens in your browser ✦</div>
@@ -352,6 +352,30 @@
     zone.addEventListener('dragover',  () => zone.classList.add('active'));
     zone.addEventListener('dragleave', () => zone.classList.remove('active'));
 
+    // WebP quality binary search to approximate webp:target-size=300000
+    // img.write() in magick-wasm calls its callback synchronously (WASM context)
+    function writeWebPTargetSize(img, targetBytes = 300_000) {
+        function tryQuality(q) {
+            img.quality = q;
+            let out = null;
+            img.write(MagickFormat.Webp, (bytes) => { out = new Uint8Array(bytes); });
+            return out;
+        }
+        // Binary search: highest quality where output size <= targetBytes (max q=75)
+        let lo = 1, hi = 75, best = null;
+        while (lo <= hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            const candidate = tryQuality(mid);
+            if (candidate.byteLength <= targetBytes) {
+                best = candidate;
+                lo = mid + 1; // fits — try higher quality
+            } else {
+                hi = mid - 1; // too big — go lower
+            }
+        }
+        return best ?? tryQuality(1); // fallback: quality 1 if even that is too large
+    }
+
     // Recursively collect all image Files from a dropped FileSystemEntry
     async function collectFiles(entry) {
         if (entry.isFile) {
@@ -400,17 +424,32 @@
 
             await new Promise((resolve) => {
                 ImageMagick.read(data, (img) => {
-                    if (img.width > 1920) {
-                        img.resize(1920, Math.round(img.height * (1920 / img.width)));
+                    // Fit within 1920×1920 box, only shrink (matches old -thumbnail "1920x1920>")
+                    if (img.width > 1920 || img.height > 1920) {
+                        const scale = Math.min(1920 / img.width, 1920 / img.height);
+                        img.resize(Math.round(img.width * scale), Math.round(img.height * scale));
                     }
-                    img.write(MagickFormat.Webp, (out) => {
-                        const blob = new Blob([out], { type: 'image/webp' });
-                        const a    = document.createElement('a');
-                        a.href     = URL.createObjectURL(blob);
-                        a.download = `crushed_${file.name.replace(/\.[^.]+$/, '')}.webp`;
+
+                    const baseName = file.name.replace(/\.[^.]+$/, '');
+
+                    function download(bytes, filename, mime) {
+                        const blob = new Blob([bytes], { type: mime });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = filename;
                         document.body.appendChild(a);
                         a.click();
                         setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+                    }
+
+                    // JPG — quality 82 (matches old crushkit_jpg output)
+                    img.quality = 82;
+                    img.write(MagickFormat.Jpg, (jpgOut) => {
+                        download(jpgOut, `${baseName}.jpg`, 'image/jpeg');
+
+                        // WebP — binary search quality to hit ~300KB target
+                        const webpOut = writeWebPTargetSize(img, 300_000);
+                        download(webpOut, `${baseName}.webp`, 'image/webp');
                         resolve();
                     });
                 });
@@ -421,7 +460,7 @@
         }
 
         zone.classList.remove('processing');
-        status.innerText = `✦ ${done} FILE${done !== 1 ? 'S' : ''} CRUSHED`;
+        status.innerText = `✦ ${done} FILE${done !== 1 ? 'S' : ''} CRUSHED — JPG + WEBP`;
         setTimeout(() => {
             status.innerText = 'Engine Online ✦ Local Processing Active';
             status.style.color = '#00ff88';

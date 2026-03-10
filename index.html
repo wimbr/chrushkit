@@ -269,10 +269,9 @@
         console.warn('[ChrushKit] crossOriginIsolated is false after reload. WASM will attempt anyway.');
     }
 
-    // --- PHASE 1: Stream with real byte progress, return a Blob URL ---
-    // Key fix: initializeImageMagick needs a URL string, not a raw ArrayBuffer.
-    // We stream for progress tracking, then build a same-origin Blob URL from
-    // the collected chunks and pass that string to the library.
+    // --- PHASE 1: Stream with real byte progress, return a Uint8Array ---
+    // initializeImageMagick accepts a Uint8Array as wasmBinary (Emscripten option).
+    // blob: URLs are explicitly rejected by the library (only http/https accepted).
     async function fetchWasmWithProgress(url) {
         status.innerText = 'Downloading engine...';
         bar.style.transition = 'width 0.1s linear';
@@ -300,24 +299,26 @@
             }
         }
 
-        // Assemble chunks into a Blob, create a local object URL
-        // This is a valid same-origin URL the library can fetch from
-        const blob = new Blob(chunks, { type: 'application/wasm' });
-        return URL.createObjectURL(blob);
+        // Combine chunks into a single Uint8Array for initializeImageMagick
+        const wasmBuffer = new Uint8Array(received);
+        let offset = 0;
+        for (const chunk of chunks) {
+            wasmBuffer.set(chunk, offset);
+            offset += chunk.length;
+        }
+        return wasmBuffer;
     }
 
     // --- Engine init ---
-    let blobUrl = null;
     try {
-        blobUrl = await fetchWasmWithProgress(wasmUrl);
+        const wasmBuffer = await fetchWasmWithProgress(wasmUrl);
 
         // Phase 2: compile (no progress API — just hold bar visually)
         status.innerText = 'Compiling engine...';
         bar.style.transition = 'width 2s ease-out';
         bar.style.width = '92%';
 
-        await initializeImageMagick(blobUrl);
-        URL.revokeObjectURL(blobUrl); // free RAM after init
+        await initializeImageMagick(wasmBuffer);
 
         bar.style.transition = 'width 0.3s ease';
         bar.style.width = '100%';
@@ -334,7 +335,6 @@
         sessionStorage.removeItem('coi-reload-attempted');
 
     } catch (e) {
-        if (blobUrl) URL.revokeObjectURL(blobUrl);
         bar.style.background = 'var(--red)';
         bar.style.boxShadow = '0 0 12px var(--red)';
         bar.style.width = '100%';

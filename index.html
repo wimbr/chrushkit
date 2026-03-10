@@ -3,36 +3,239 @@
 <head>
     <meta charset="UTF-8">
     <title>GSM STUDIOS ✦ CRUSHKIT</title>
+
+    <!--
+        COI SERVICE WORKER — must be the FIRST script, before anything else.
+        On first visit: SW installs but doesn't yet control the page.
+        The inline script below checks crossOriginIsolated and forces a reload
+        if needed, so the SW can intercept all subsequent fetches.
+    -->
     <script src="coi-serviceworker.js"></script>
+
+    <!--
+        CRITICAL FIX:
+        coi-serviceworker's reload only triggers on 'updatefound' (new SW version).
+        It does NOT reload on first install. We must do that ourselves.
+
+        Logic:
+          - If SW is supported AND crossOriginIsolated is false:
+              → SW might just need to activate. Force a reload once.
+              → Use sessionStorage to avoid infinite reload loop.
+          - If crossOriginIsolated is still false after reload:
+              → Browser doesn't support it (rare) or something else is wrong.
+              → We show a warning but still attempt WASM (may work in degraded mode).
+    -->
+    <script>
+        if ('serviceWorker' in navigator && !self.crossOriginIsolated) {
+            if (!sessionStorage.getItem('coi-reload-attempted')) {
+                sessionStorage.setItem('coi-reload-attempted', '1');
+                // Wait for SW to finish installing, then reload
+                navigator.serviceWorker.ready.then(() => location.reload());
+            }
+        }
+    </script>
+
     <style>
-        body { background: #080808; color: #fff; font-family: 'Inter', 'Helvetica', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        
+        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400&family=Bebas+Neue&display=swap');
+
+        :root {
+            --green: #00ff88;
+            --red: #ff3c3c;
+            --bg: #080808;
+            --surface: #0f0f0f;
+            --border: #1e1e1e;
+            --muted: #444;
+            --text: #fff;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'DM Mono', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        /* Subtle grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .wrapper {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
         /* Branding */
-        h1 { letter-spacing: 4px; font-weight: 200; margin-bottom: 5px; color: #fff; }
-        .subtitle { color: #555; font-size: 0.8rem; margin-bottom: 30px; letter-spacing: 1px; }
+        h1 {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 2.8rem;
+            letter-spacing: 10px;
+            font-weight: 400;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 0.68rem;
+            margin-bottom: 36px;
+            letter-spacing: 3px;
+        }
+
+        /* COI Warning Banner (shown if crossOriginIsolated fails after reload) */
+        #coi-warning {
+            display: none;
+            background: rgba(255, 60, 60, 0.08);
+            border: 1px solid rgba(255, 60, 60, 0.3);
+            color: #ff6b6b;
+            font-size: 10px;
+            letter-spacing: 1px;
+            padding: 8px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            max-width: 400px;
+            text-align: center;
+        }
 
         /* Progress Container */
-        #loader-container { width: 300px; margin-bottom: 20px; text-align: center; }
-        #progress-wrapper { width: 100%; height: 4px; background: #222; border-radius: 10px; overflow: hidden; margin-top: 10px; }
-        #progress-bar { width: 0%; height: 100%; background: #00ff88; transition: width 0.3s ease; box-shadow: 0 0 10px #00ff88; }
+        #loader-container {
+            width: 320px;
+            margin-bottom: 24px;
+            text-align: center;
+            transition: opacity 1s ease;
+        }
+
+        #status-text {
+            font-size: 10px;
+            color: var(--muted);
+            margin-bottom: 8px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            transition: color 0.3s;
+        }
+
+        #progress-wrapper {
+            width: 100%;
+            height: 2px;
+            background: var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #progress-bar {
+            width: 0%;
+            height: 100%;
+            background: var(--green);
+            transition: width 0.3s ease;
+            box-shadow: 0 0 12px var(--green);
+        }
 
         /* Drop Zone */
-        #drop-zone { 
-            width: 400px; height: 250px; border: 1px solid #222; border-radius: 20px; 
-            display: flex; flex-direction: column; align-items: center; justify-content: center; 
-            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); cursor: pointer; background: #0f0f0f;
-            opacity: 0.3; pointer-events: none; /* Disabled until loaded */
+        #drop-zone {
+            width: 420px;
+            height: 260px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            cursor: pointer;
+            background: var(--surface);
+            opacity: 0.3;
+            pointer-events: none;
         }
-        #drop-zone.ready { opacity: 1; pointer-events: auto; border-color: #333; }
-        #drop-zone.active { border-color: #00ff88; background: #121212; transform: scale(1.03); }
-        
-        #label { font-size: 1rem; letter-spacing: 1px; color: #888; }
-        #status-text { font-size: 11px; color: #444; margin-top: 8px; text-transform: uppercase; }
+
+        #drop-zone.ready {
+            opacity: 1;
+            pointer-events: auto;
+            border-color: #2a2a2a;
+        }
+
+        #drop-zone.active {
+            border-color: var(--green);
+            background: #0c0c0c;
+            transform: scale(1.025);
+            box-shadow: 0 0 40px rgba(0, 255, 136, 0.06);
+        }
+
+        #drop-zone.processing {
+            border-color: var(--green);
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        #drop-icon {
+            font-size: 2rem;
+            opacity: 0.3;
+            transition: opacity 0.3s;
+        }
+
+        #drop-zone.active #drop-icon,
+        #drop-zone.ready:hover #drop-icon {
+            opacity: 0.7;
+        }
+
+        #label {
+            font-size: 0.8rem;
+            letter-spacing: 3px;
+            color: var(--muted);
+            text-transform: uppercase;
+            transition: color 0.3s;
+        }
+
+        #drop-zone.ready #label { color: #666; }
+        #drop-zone.active #label { color: var(--green); }
+
+        #sub-label {
+            font-size: 9px;
+            color: #2a2a2a;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        #drop-zone.ready #sub-label { color: #333; }
+
+        /* Footer note */
+        .privacy-note {
+            margin-top: 24px;
+            font-size: 9px;
+            color: #222;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .privacy-note span { color: #333; }
     </style>
 </head>
 <body>
+<div class="wrapper">
     <h1>GSM STUDIOS</h1>
     <div class="subtitle">CRUSHKIT v1.0 ✦ BY WIMBR</div>
+
+    <!-- Shown only if COI couldn't be established after reload attempt -->
+    <div id="coi-warning">
+        ⚠ ISOLATION MODE UNAVAILABLE — ENGINE MAY RUN SLOWER
+    </div>
 
     <div id="loader-container">
         <div id="status-text">Warming up engines...</div>
@@ -40,62 +243,135 @@
     </div>
 
     <div id="drop-zone">
+        <div id="drop-icon">⬇</div>
         <span id="label">WAITING FOR ENGINE</span>
+        <span id="sub-label">JPG · PNG · TIFF · BMP</span>
     </div>
 
-    <script type="module">
-        import { initializeImageMagick, ImageMagick, MagickFormat } from 'https://cdn.jsdelivr.net/npm/@imagemagick/magick-wasm@0.0.38/dist/index.mjs';
-        const wasmUrl = 'https://cdn.jsdelivr.net/npm/@imagemagick/magick-wasm@0.0.38/dist/magick.wasm';
+    <div class="privacy-note">✦ <span>zero upload</span> · all processing happens in your browser ✦</div>
+</div>
 
-        const bar = document.getElementById('progress-bar');
-        const status = document.getElementById('status-text');
-        const zone = document.getElementById('drop-zone');
-        const label = document.getElementById('label');
+<script type="module">
+    import { initializeImageMagick, ImageMagick, MagickFormat }
+        from 'https://cdn.jsdelivr.net/npm/@imagemagick/magick-wasm@0.0.38/dist/index.mjs';
 
-        // Fake progress to show user something is happening
-        let progress = 0;
-        const interval = setInterval(() => {
-            if (progress < 90) {
-                progress += Math.random() * 5;
-                bar.style.width = progress + '%';
-            }
-        }, 200);
+    const wasmUrl = 'https://cdn.jsdelivr.net/npm/@imagemagick/magick-wasm@0.0.38/dist/magick.wasm';
 
-        try {
-            await initializeImageMagick(wasmUrl);
-            
-            // Success!
-            clearInterval(interval);
-            bar.style.width = '100%';
-            status.innerText = "Engine Online ✦ Local Processing Active";
-            label.innerText = "DRAG TO CRUSH";
-            zone.classList.add('ready');
-            
-            // Hide bar after 2 seconds
-            setTimeout(() => {
-                document.getElementById('loader-container').style.opacity = '0.5';
-            }, 2000);
+    const bar      = document.getElementById('progress-bar');
+    const status   = document.getElementById('status-text');
+    const zone     = document.getElementById('drop-zone');
+    const label    = document.getElementById('label');
+    const warning  = document.getElementById('coi-warning');
 
-        } catch (e) {
-            status.innerText = "ERROR: WASM BLOCKED";
-            bar.style.background = "red";
-            console.error(e);
+    // --- COI status feedback ---
+    // If we already tried a reload and still not isolated, surface a warning.
+    // (Doesn't block — WASM will still attempt to load.)
+    if (!self.crossOriginIsolated && sessionStorage.getItem('coi-reload-attempted')) {
+        warning.style.display = 'block';
+        console.warn('crossOriginIsolated is false after reload. SharedArrayBuffer may be unavailable. WASM will attempt anyway.');
+    }
+
+    // --- Fake progress (visual feedback during WASM network fetch) ---
+    let progress = 0;
+    const interval = setInterval(() => {
+        if (progress < 88) {
+            // Ease the fake progress: fast at first, slower near the end
+            progress += (88 - progress) * 0.04;
+            bar.style.width = progress + '%';
+        }
+    }, 150);
+
+    // --- Engine init ---
+    try {
+        await initializeImageMagick(wasmUrl);
+
+        clearInterval(interval);
+        bar.style.width = '100%';
+        status.innerText = 'Engine Online ✦ Local Processing Active';
+        status.style.color = '#00ff88';
+        label.innerText = 'DRAG TO CRUSH';
+        zone.classList.add('ready');
+
+        // Fade loader after success
+        setTimeout(() => {
+            document.getElementById('loader-container').style.opacity = '0.25';
+            status.style.color = '';
+        }, 2500);
+
+        // Clear the reload flag now that engine loaded successfully
+        sessionStorage.removeItem('coi-reload-attempted');
+
+    } catch (e) {
+        clearInterval(interval);
+        bar.style.background = 'var(--red)';
+        bar.style.boxShadow = '0 0 12px var(--red)';
+        bar.style.width = '100%';
+        status.innerText = 'ERROR: ENGINE FAILED TO LOAD';
+        status.style.color = 'var(--red)';
+        label.innerText = 'SEE CONSOLE';
+        console.error('[ChrushKit] WASM init failed:', e);
+    }
+
+    // --- Drag & drop ---
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(n => {
+        document.body.addEventListener(n, e => e.preventDefault());
+    });
+
+    zone.addEventListener('dragover',  () => zone.classList.add('active'));
+    zone.addEventListener('dragleave', () => zone.classList.remove('active'));
+
+    zone.addEventListener('drop', async (e) => {
+        zone.classList.remove('active');
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        if (!files.length) return;
+
+        zone.classList.add('processing');
+        status.style.color = '#00ff88';
+
+        let done = 0;
+        for (const file of files) {
+            status.innerText = `CRUSHING ${done + 1} / ${files.length} — ${file.name}`;
+            bar.style.width = '0%';
+
+            const data = new Uint8Array(await file.arrayBuffer());
+
+            await new Promise((resolve) => {
+                ImageMagick.read(data, (img) => {
+                    // Resize to max 1920px wide, preserve aspect ratio
+                    // img.resize() with geometry string is safer across versions
+                    if (img.width > 1920) {
+                        img.resize(1920, Math.round(img.height * (1920 / img.width)));
+                    }
+
+                    img.write(MagickFormat.Webp, (out) => {
+                        const blob = new Blob([out], { type: 'image/webp' });
+                        const a    = document.createElement('a');
+                        a.href     = URL.createObjectURL(blob);
+                        a.download = `crushed_${file.name.replace(/\.[^.]+$/, '')}.webp`;
+                        document.body.appendChild(a);
+                        a.click();
+                        // Clean up the object URL after a short delay
+                        setTimeout(() => {
+                            URL.revokeObjectURL(a.href);
+                            a.remove();
+                        }, 1000);
+                        resolve();
+                    });
+                });
+            });
+
+            done++;
+            bar.style.width = (done / files.length * 100) + '%';
         }
 
-        // Global drag/drop prevention
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(n => {
-            document.body.addEventListener(n, e => e.preventDefault());
-        });
-
-        zone.addEventListener('dragover', () => zone.classList.add('active'));
-        zone.addEventListener('dragleave', () => zone.classList.remove('active'));
-
-        zone.addEventListener('drop', async (e) => {
-            zone.classList.remove('active');
-            const files = Array.from(e.dataTransfer.files);
-            if (!files.length) return;
-
-            status.innerText = `CRUSHING ${files.length} FILE(S)...`;
-            status.style.color = "#00ff88";
-
-            for (const file of files) {
+        zone.classList.remove('processing');
+        status.innerText = `✦ ${done} FILE${done !== 1 ? 'S' : ''} CRUSHED`;
+        setTimeout(() => {
+            status.innerText = 'Engine Online ✦ Local Processing Active';
+            status.style.color = '#00ff88';
+            bar.style.width = '100%';
+        }, 3000);
+    });
+</script>
+</body>
+</html>

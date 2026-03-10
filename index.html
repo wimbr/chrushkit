@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>GSM STUDIOS ✦ CRUSHKIT</title>
+    <title>CrushKit — Image Compressor</title>
 
     <!--
         COI SERVICE WORKER — must be the FIRST script, before anything else.
@@ -39,7 +39,8 @@
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400&family=Bebas+Neue&display=swap');
 
         :root {
-            --green: #00ff88;
+            --accent: #00c896;
+            --accent2: #ff8c42;
             --red: #ff3c3c;
             --bg: #080808;
             --surface: #0f0f0f;
@@ -83,20 +84,30 @@
         }
 
         /* Branding */
+        .logo {
+            width: 100px;
+            height: 100px;
+            border-radius: 22px;
+            margin-bottom: 16px;
+            display: block;
+        }
+
         h1 {
             font-family: 'Bebas Neue', sans-serif;
-            font-size: 2.8rem;
+            font-size: 2.4rem;
             letter-spacing: 10px;
             font-weight: 400;
             color: var(--text);
-            margin-bottom: 4px;
+            margin-bottom: 6px;
         }
 
         .subtitle {
             color: var(--muted);
-            font-size: 0.68rem;
+            font-size: 0.65rem;
             margin-bottom: 36px;
-            letter-spacing: 3px;
+            letter-spacing: 2px;
+            text-align: center;
+            line-height: 1.8;
         }
 
         /* COI Warning Banner (shown if crossOriginIsolated fails after reload) */
@@ -142,9 +153,9 @@
         #progress-bar {
             width: 0%;
             height: 100%;
-            background: var(--green);
+            background: linear-gradient(90deg, var(--accent2), var(--accent));
             transition: width 0.3s ease;
-            box-shadow: 0 0 12px var(--green);
+            box-shadow: 0 0 12px var(--accent);
         }
 
         /* Drop Zone */
@@ -172,14 +183,14 @@
         }
 
         #drop-zone.active {
-            border-color: var(--green);
+            border-color: var(--accent);
             background: #0c0c0c;
             transform: scale(1.025);
-            box-shadow: 0 0 40px rgba(0, 255, 136, 0.06);
+            box-shadow: 0 0 40px rgba(0, 200, 150, 0.08);
         }
 
         #drop-zone.processing {
-            border-color: var(--green);
+            border-color: var(--accent);
             opacity: 0.7;
             pointer-events: none;
         }
@@ -204,7 +215,7 @@
         }
 
         #drop-zone.ready #label { color: #666; }
-        #drop-zone.active #label { color: var(--green); }
+        #drop-zone.active #label { color: var(--accent); }
 
         #sub-label {
             font-size: 9px;
@@ -229,8 +240,12 @@
 </head>
 <body>
 <div class="wrapper">
-    <h1>GSM STUDIOS</h1>
-    <div class="subtitle">CRUSHKIT v1.0 ✦ BY WIMBR</div>
+    <img src="logo.png" alt="CrushKit" class="logo">
+    <h1>CRUSHKIT</h1>
+    <div class="subtitle">
+        Drop images. Get compressed JPG + WebP.<br>
+        Runs entirely in your browser — nothing uploaded.
+    </div>
 
     <!-- Shown only if COI couldn't be established after reload attempt -->
     <div id="coi-warning">
@@ -324,7 +339,7 @@
         bar.style.transition = 'width 0.3s ease';
         bar.style.width = '100%';
         status.innerText = 'Engine Online ✦ Local Processing Active';
-        status.style.color = '#00ff88';
+        status.style.color = '#00c896';
         label.innerText = 'DRAG TO CRUSH';
         zone.classList.add('ready');
 
@@ -414,7 +429,7 @@
         if (!files.length) return;
 
         zone.classList.add('processing');
-        status.style.color = '#00ff88';
+        status.style.color = '#00c896';
 
         const zipContents = {};
         let done = 0;
@@ -467,7 +482,7 @@
         status.innerText = `✦ ${done} FILE${done !== 1 ? 'S' : ''} CRUSHED — ZIP READY`;
         setTimeout(() => {
             status.innerText = 'Engine Online ✦ Local Processing Active';
-            status.style.color = '#00ff88';
+            status.style.color = '#00c896';
             bar.style.width = '100%';
         }, 3000);
     });

@@ -252,11 +252,10 @@
 </div>
 
 <script type="module">
-    import { initializeImageMagick, ImageMagick, MagickFormat }
-        from 'https://cdn.jsdelivr.net/npm/@imagemagick/magick-wasm@0.0.38/dist/index.mjs';
-
-    const wasmUrl = 'https://cdn.jsdelivr.net/npm/@imagemagick/magick-wasm@0.0.38/dist/magick.wasm';
-
+    // To:
+import { initializeImageMagick, ImageMagick, MagickFormat }
+    from './magick-wasm.js';
+const wasmUrl = './magick.wasm';
     const bar      = document.getElementById('progress-bar');
     const status   = document.getElementById('status-text');
     const zone     = document.getElementById('drop-zone');

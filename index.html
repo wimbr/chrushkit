@@ -254,6 +254,7 @@
 <script type="module">
     import { initializeImageMagick, ImageMagick, MagickFormat }
         from './magick-wasm.js';
+    import { zipSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 
     const wasmUrl = './magick.wasm';
 
@@ -415,7 +416,9 @@
         zone.classList.add('processing');
         status.style.color = '#00ff88';
 
+        const zipContents = {};
         let done = 0;
+
         for (const file of files) {
             status.innerText = `CRUSHING ${done + 1} / ${files.length} — ${file.name}`;
             bar.style.width = '0%';
@@ -432,24 +435,14 @@
 
                     const baseName = file.name.replace(/\.[^.]+$/, '');
 
-                    function download(bytes, filename, mime) {
-                        const blob = new Blob([bytes], { type: mime });
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
-                        a.download = filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-                    }
-
-                    // JPG — quality 82 (matches old crushkit_jpg output)
+                    // JPG — quality 82
                     img.quality = 82;
                     img.write(MagickFormat.Jpg, (jpgOut) => {
-                        download(jpgOut, `${baseName}.jpg`, 'image/jpeg');
+                        zipContents[`crushkit_jpg/${baseName}.jpg`] = new Uint8Array(jpgOut);
 
-                        // WebP — binary search quality to hit ~300KB target
+                        // WebP — binary search to ~300KB
                         const webpOut = writeWebPTargetSize(img, 300_000);
-                        download(webpOut, `${baseName}.webp`, 'image/webp');
+                        zipContents[`crushkit_webp/${baseName}.webp`] = webpOut;
                         resolve();
                     });
                 });
@@ -459,8 +452,19 @@
             bar.style.width = (done / files.length * 100) + '%';
         }
 
+        // Zip everything and trigger a single download
+        status.innerText = 'Zipping…';
+        const zipped = zipSync(zipContents, { level: 0 }); // level 0 = store, images are already compressed
+        const blob = new Blob([zipped], { type: 'application/zip' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `crushkit_${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+
         zone.classList.remove('processing');
-        status.innerText = `✦ ${done} FILE${done !== 1 ? 'S' : ''} CRUSHED — JPG + WEBP`;
+        status.innerText = `✦ ${done} FILE${done !== 1 ? 'S' : ''} CRUSHED — ZIP READY`;
         setTimeout(() => {
             status.innerText = 'Engine Online ✦ Local Processing Active';
             status.style.color = '#00ff88';
